@@ -1,0 +1,7 @@
+.DS_Store
+node_modules/
+test-results/
+__pycache__/
+*.log
+.env
+.env.*

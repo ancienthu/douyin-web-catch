@@ -1,0 +1,57 @@
+{
+  "manifest_version": 3,
+  "name": "抖音作品清单",
+  "version": "0.1.5",
+  "description": "在作者主页整理公开视频，查看互动数据、下载单条视频并导出 Excel。",
+  "minimum_chrome_version": "120",
+  "permissions": [
+    "downloads",
+    "storage"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_title": "抖音作品清单",
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icons/icon-16.png",
+      "32": "icons/icon-32.png",
+      "48": "icons/icon-48.png"
+    }
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://www.douyin.com/*"
+      ],
+      "js": [
+        "bridge.js"
+      ],
+      "run_at": "document_start",
+      "world": "MAIN"
+    },
+    {
+      "matches": [
+        "https://www.douyin.com/*"
+      ],
+      "js": [
+        "core.js",
+        "xlsx.js",
+        "content.js"
+      ],
+      "run_at": "document_start",
+      "world": "ISOLATED"
+    }
+  ],
+  "host_permissions": [
+    "https://*.douyinvod.com/*",
+    "https://*.douyincdn.com/*"
+  ],
+  "icons": {
+    "16": "icons/icon-16.png",
+    "32": "icons/icon-32.png",
+    "48": "icons/icon-48.png",
+    "128": "icons/icon-128.png"
+  }
+}
