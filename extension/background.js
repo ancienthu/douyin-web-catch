@@ -12,10 +12,11 @@ async function report(job, state, error = '') {
   try { await chrome.tabs.sendMessage(job.tab, { type: 'download-state', author: job.author, id: job.id, state, error, attempt: job.index + 1, total: job.urls.length }); } catch { /* Tab may have closed. */ }
 }
 // Probe a small MP4 prefix before creating any Chrome download task.
-// Only direct video CDN hosts are accessible; no cookies, redirects or full-file buffering.
-async function probeVideo(url) {
+// Only direct video CDN hosts are accessible; no redirects or full-file buffering.
+// TikTok checks use the browser's existing login, as the subsequent Chrome download does.
+async function probeVideo(url, author) {
   const parsed = new URL(C.mediaURL(url));
-  if (!['douyinvod.com', 'douyincdn.com'].some(d => parsed.hostname === d || parsed.hostname.endsWith('.' + d))) {
+  if (!C.downloadURL(url, author)) {
     throw new Error('没有可验证的视频直链，请重新读取作品。');
   }
   const controller = new AbortController();
@@ -24,7 +25,7 @@ async function probeVideo(url) {
   try {
     const response = await fetch(parsed.href, {
       method: 'GET', headers: { Range: 'bytes=0-31', Accept: '*/*' },
-      credentials: 'omit', redirect: 'error', cache: 'no-store', signal: controller.signal
+      credentials: author.startsWith('tiktok:') ? 'include' : 'omit', redirect: 'error', cache: 'no-store', signal: controller.signal
     });
     if (![200, 206].includes(response.status)) throw new Error(`视频地址不可用（HTTP ${response.status}）`);
     if (/(?:text\/|json|xml)/i.test(response.headers.get('content-type') || '')) throw new Error('地址返回错误页面，已跳过。');
@@ -51,7 +52,7 @@ async function attempt(job) {
   while (job.index < job.urls.length) {
     try {
       await report(job, 'checking');
-      await probeVideo(job.urls[job.index]);
+      await probeVideo(job.urls[job.index], job.author);
       const id = await chrome.downloads.download({ url: job.urls[job.index], filename: job.filename, conflictAction: 'uniquify', saveAs: false, headers: [{ name: 'Accept', value: '*/*' }] });
       await chrome.storage.session.set({ [jobKey(id)]: job });
       await report(job, 'in_progress');
@@ -102,9 +103,9 @@ chrome.runtime.onMessage.addListener((m, sender, respond) => {
       const r = m.record;
       if (!r || !/^\d{5,30}$/.test(r.id) || !Array.isArray(r.candidates)) throw new Error('作品数据无效。');
       // Also fixes candidate order for older content-script data until the page is refreshed.
-      const urls = C.preferCandidates(r.candidates.slice(0, 100));
-      if (!urls.length) throw new Error('没有受支持的视频地址，请在抖音打开这条作品后重试。');
-      const record = { urls, filename: `抖音作品/${C.safeFilename(r.title)}_${r.id}.mp4`, updated: Date.now() };
+      const urls = C.preferCandidates(r.candidates.slice(0, 100)).filter(url => C.downloadURL(url, author));
+      if (!urls.length) throw new Error('没有受支持的视频地址，请在当前网站打开这条作品后重新读取。');
+      const record = { urls, filename: `${C.platformFor(author)}作品/${C.safeFilename(r.title)}_${r.id}.mp4`, updated: Date.now() };
       const all = await chrome.storage.session.get(null);
       await chrome.storage.session.remove(Object.keys(all).filter(k => k.startsWith(`record:${tab}:`) || (k.startsWith('record:') && Date.now() - all[k].updated > 60000)));
       await chrome.storage.session.set({ [keyFor(tab, author, r.id)]: record });

@@ -1,6 +1,7 @@
 /* Runs in the page world. Fixed endpoints, no retained response backlog or cookie reads. */
 (() => {
   'use strict';
+  if (location.origin !== 'https://www.douyin.com') return;
   const CHANNEL = 'dy-worklist-v1', controllers = new Map();
   const currentAuthor = () => location.pathname.match(/^\/user\/([A-Za-z0-9._-]+)(?:\/|$)/)?.[1] || '';
   const send = message => window.postMessage({ channel: CHANNEL, from: 'page', ...message }, location.origin);

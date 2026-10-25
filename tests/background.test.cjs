@@ -126,3 +126,15 @@ test('empty MP4 responses never create download tasks', async () => {
   assert.equal(s.downloads.length, 0);
   assert.equal(s.reports.at(-1).state, 'interrupted');
 });
+
+test('TikTok sender downloads only video CDN files into its own folder with preflight', async () => {
+  const s = setup(); s.sender.url = 'https://www.tiktok.com/@creator.test';
+  const author = 'tiktok:creator.test', url = 'https://v16-webapp-prime.us.tiktok.com/test.mp4';
+  assert.equal((await s.send({ type: 'register-download', author, record: { ...record, candidates: [url] } })).ok, true);
+  await s.send({ type: 'download', author, id: record.id });
+  assert.equal(s.probes.length, 1); assert.equal(s.downloads.length, 1); assert.equal(s.downloads[0].url, url);
+  assert.equal(s.probes[0].options.credentials, 'include');
+  assert.match(s.downloads[0].filename, /^TikTok作品\//);
+  assert.equal((await s.send({ type: 'register-download', author, record })).ok, false);
+  assert.equal((await s.send({ type: 'register-download', author, record: { ...record, candidates: ['https://www.tiktok.com/api/post/item_list/'] } })).ok, false);
+});

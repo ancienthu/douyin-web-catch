@@ -16,9 +16,9 @@ class Element {
   remove() {}
   click() { return this.events.click?.({ isTrusted: true }); }
 }
-function setup() {
+function setup(href = 'https://www.douyin.com/user/author-one') {
   const html = new Element('html'), windowEvents = {}, posted = [], timers = [], runtime = {}, interval = {};
-  const location = { href: 'https://www.douyin.com/user/author-one', origin: 'https://www.douyin.com' };
+  const location = { href, origin: 'https://www.douyin.com' };
   const window = { postMessage: m => posted.push(m), addEventListener: (name, fn) => { windowEvents[name] = fn; } };
   const document = { readyState: 'complete', documentElement: html, body: new Element('body'), createElement: tag => new Element(tag) };
   const context = { window, document, location, crypto: { randomUUID }, DYCore, DYXlsx: {}, chrome: { runtime: { sendMessage: async () => ({ ok: true }), onMessage: { addListener: fn => { runtime.message = fn; } } } }, AbortController, DOMException, URL,
@@ -115,4 +115,66 @@ test('active reader requests all pages automatically and closing the panel does 
   await running; await s.flush();
   assert.equal(s.all().find(e => e.tagName === 'strong').textContent, '2');
   assert.ok(s.all().some(e => e.textContent.startsWith('读取结束：')));
+});
+
+test('ordinary pages hide the worklist and SPA navigation only shows it on profiles', async () => {
+  for (const path of ['/', '/jingxuan', '/search/test', '/video/12345']) {
+    const s = setup(`https://www.douyin.com${path}`);
+    const host = s.html.children[0];
+    assert.equal(host.hidden, true);
+    s.button('▤ 作品清单').click();
+    assert.equal(s.all().find(e => e.tagName === 'section').hidden, true);
+    s.location.href = 'https://www.douyin.com/user/author-one';
+    s.interval.fn(); await s.flush();
+    assert.equal(host.hidden, false);
+    s.button('▤ 作品清单').click();
+    s.send(observed([item('12345')])); await s.flush();
+    assert.equal(s.all().find(e => e.tagName === 'section').hidden, false);
+    s.location.href = 'https://www.douyin.com/jingxuan';
+    s.windowEvents.popstate(); await s.flush();
+    assert.equal(host.hidden, true);
+    assert.equal(s.all().find(e => e.tagName === 'section').hidden, true);
+    assert.equal(s.all().find(e => e.tagName === 'strong').textContent, '0');
+    s.location.href = 'https://www.douyin.com/user/author-two';
+    s.interval.fn(); await s.flush();
+    assert.equal(host.hidden, false);
+    assert.equal(s.all().find(e => e.tagName === 'section').hidden, true);
+    assert.equal(s.posted.filter(m => m.type === 'observe').at(-1).enabled, false);
+  }
+});
+
+test('TikTok active pages share memory pagination, search, author cleanup and explicit completion', async () => {
+  const s = setup('https://www.tiktok.com/@creator.one'); s.location.origin = 'https://www.tiktok.com';
+  const author = 'tiktok:creator.one';
+  const video = id => ({ id, desc: `TikTok ${id}`, author: { uniqueId: 'creator.one', nickname: 'TT Author' }, stats: { diggCount: 0, shareCount: 2, commentCount: 3 }, video: { playAddr: 'https://v16-webapp-prime.us.tiktok.com/test' } });
+  assert.equal(s.html.children[0].hidden, false); s.button('▤ 作品清单').click();
+  const running = s.button('读取全部').click();
+  let req = s.posted.find(m => m.kind === 'posts'); assert.equal(req.author, author);
+  s.send({ type: 'response', id: req.id, author, data: { statusCode: 0, itemList: [video('12345')], hasMore: true, cursor: '100' } }); await s.flush();
+  s.button('关闭 ×').click();
+  s.timers.find(t => t.ms === 1000 && !t.cancelled).fn(); await s.flush();
+  req = s.posted.filter(m => m.kind === 'posts').at(-1); assert.equal(req.cursor, '100');
+  s.send({ type: 'response', id: req.id, author, data: { statusCode: 0, itemList: [video('67890')], hasMore: false } }); await running; await s.flush();
+  assert.equal(s.all().find(e => e.tagName === 'strong').textContent, '2'); assert.ok(s.all().some(e => e.textContent.startsWith('读取结束：')));
+  s.button('▤ 作品清单').click(); const input = s.all().find(e => e.tagName === 'input'); input.value = '67890'; input.events.input(); await s.flush();
+  assert.ok(s.all().some(e => e.tagName === 'a' && e.href === 'https://www.tiktok.com/@creator.one/video/67890'));
+  assert.ok(s.all().some(e => e.textContent === '导出 Excel (1)'));
+  s.location.href = 'https://www.tiktok.com/@creator.one/video/67890'; s.interval.fn(); await s.flush();
+  assert.equal(s.html.children[0].hidden, true); assert.equal(s.all().find(e => e.tagName === 'strong').textContent, '0');
+});
+test('TikTok passive collection accepts matching author responses and keeps partial state', async () => {
+  const s = setup('https://www.tiktok.com/@creator.one'); s.location.origin = 'https://www.tiktok.com'; s.button('▤ 作品清单').click();
+  s.send({ type: 'observed', author: 'tiktok:creator.one', path: '/api/post/item_list', data: { statusCode: 0, hasMore: false, itemList: [
+    { id: '12345', author: { uniqueId: 'other' }, video: {}, desc: 'Other' },
+    { id: '67890', author: { uniqueId: 'creator.one' }, video: {}, desc: 'Current' }
+  ] } }); await s.flush();
+  assert.equal(s.all().find(e => e.tagName === 'strong').textContent, '1');
+  assert.equal(s.all().some(e => e.textContent.startsWith('读取结束：')), false);
+});
+test('TikTok empty final page cannot erase existing rows when the profile reports published works', async () => {
+  const s = setup('https://www.tiktok.com/@creator.one'); s.location.origin = 'https://www.tiktok.com'; const author = 'tiktok:creator.one';
+  const running = s.button('读取全部').click(); const p = s.posted.find(m => m.kind === 'profile'), r = s.posted.find(m => m.kind === 'posts');
+  s.send({ type: 'response', id: p.id, author, data: { status_code: 0, user: { sec_uid: author, nickname: 'TT', aweme_count: 2 } } }); await s.flush();
+  s.send({ type: 'response', id: r.id, author, data: { statusCode: 0, hasMore: false } }); await running; await s.flush();
+  assert.ok(s.all().some(e => e.textContent.includes('无法确认读取完整'))); assert.equal(s.all().some(e => e.textContent.startsWith('读取结束：')), false);
 });

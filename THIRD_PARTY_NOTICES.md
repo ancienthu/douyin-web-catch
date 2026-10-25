@@ -59,3 +59,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ```
+
+## TikTok 字段核对
+
+TikTok 适配主要依据浏览器中当前作者主页正常返回的公开作品响应独立实现；另查阅了 [yt-dlp 的 TikTok 提取器](https://github.com/yt-dlp/yt-dlp/blob/master/yt_dlp/extractor/tiktok.py) 核对初始页面数据入口和字段命名。未引入其运行时、Cookie 处理或签名实现。

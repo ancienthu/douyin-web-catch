@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "抖音作品清单",
-  "version": "0.1.5",
-  "description": "在作者主页整理公开视频，查看互动数据、下载单条视频并导出 Excel。",
+  "name": "抖音 / TikTok 作品清单",
+  "version": "0.2.0",
+  "description": "在抖音或 TikTok 作者主页整理公开视频，查看互动数据、下载单条视频并导出 Excel。",
   "minimum_chrome_version": "120",
   "permissions": [
     "downloads",
@@ -12,7 +12,7 @@
     "service_worker": "background.js"
   },
   "action": {
-    "default_title": "抖音作品清单",
+    "default_title": "抖音 / TikTok 作品清单",
     "default_popup": "popup.html",
     "default_icon": {
       "16": "icons/icon-16.png",
@@ -23,17 +23,20 @@
   "content_scripts": [
     {
       "matches": [
-        "https://www.douyin.com/*"
+        "https://www.douyin.com/*",
+        "https://www.tiktok.com/*"
       ],
       "js": [
-        "bridge.js"
+        "bridge.js",
+        "tiktok-bridge.js"
       ],
       "run_at": "document_start",
       "world": "MAIN"
     },
     {
       "matches": [
-        "https://www.douyin.com/*"
+        "https://www.douyin.com/*",
+        "https://www.tiktok.com/*"
       ],
       "js": [
         "core.js",
@@ -46,7 +49,10 @@
   ],
   "host_permissions": [
     "https://*.douyinvod.com/*",
-    "https://*.douyincdn.com/*"
+    "https://*.douyincdn.com/*",
+    "https://*.tiktok.com/*",
+    "https://*.tiktokcdn.com/*",
+    "https://*.tiktokcdn-us.com/*"
   ],
   "icons": {
     "16": "icons/icon-16.png",

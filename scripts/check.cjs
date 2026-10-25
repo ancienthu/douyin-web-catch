@@ -13,5 +13,5 @@ for (const file of new Set([...Object.values(manifest.icons || {}), ...Object.va
   if (data.subarray(0, 8).toString('hex') !== '89504e470d0a1a0a') throw new Error(`Invalid PNG icon: ${file}`);
 }
 if (manifest.manifest_version !== 3 || manifest.permissions.some(p => !['downloads', 'storage'].includes(p))) throw new Error('Unexpected permissions');
-if (JSON.stringify(manifest.host_permissions) !== JSON.stringify(['https://*.douyinvod.com/*', 'https://*.douyincdn.com/*'])) throw new Error('Unexpected CDN permissions');
+if (JSON.stringify(manifest.host_permissions) !== JSON.stringify(['https://*.douyinvod.com/*', 'https://*.douyincdn.com/*', 'https://*.tiktok.com/*', 'https://*.tiktokcdn.com/*', 'https://*.tiktokcdn-us.com/*'])) throw new Error('Unexpected CDN permissions');
 console.log(`Manifest V3 and ${files.length} packaged files verified; permissions: ${manifest.permissions.join(', ')}`);

@@ -1,10 +1,17 @@
 /* Shared pure data utilities. No network or DOM access. */
 (function (root) {
   'use strict';
-  const MEDIA_DOMAINS = ['douyin.com', 'douyinvod.com', 'douyincdn.com', 'bytecdn.cn', 'bytecdn.com', 'byteimg.com', 'ibytedtos.com'];
+  const MEDIA_DOMAINS = ['douyin.com', 'douyinvod.com', 'douyincdn.com', 'bytecdn.cn', 'bytecdn.com', 'byteimg.com', 'ibytedtos.com', 'tiktokcdn.com', 'tiktokcdn-us.com'];
+  const tiktokVideoHost = host => /^v\d+[a-z0-9-]*\.(?:us\.)?tiktok\.com$/.test(host);
+  const platformFor = author => author.startsWith('tiktok:') ? 'TikTok' : '抖音';
+  const profileURL = author => author.startsWith('tiktok:') ? `https://www.tiktok.com/@${author.slice(7)}` : `https://www.douyin.com/user/${author}`;
   function authorFromURL(value) {
     try {
       const url = new URL(value);
+      if (url.origin === 'https://www.tiktok.com') {
+        const name = url.pathname.match(/^\/@([A-Za-z0-9._]{1,24})\/?$/)?.[1];
+        return name ? `tiktok:${name.toLowerCase()}` : '';
+      }
       return url.origin === 'https://www.douyin.com' ? (url.pathname.match(/^\/user\/([A-Za-z0-9._-]+)(?:\/|$)/)?.[1] || '') : '';
     } catch { return ''; }
   }
@@ -13,8 +20,15 @@
       if (typeof value !== 'string' || value.length > 4096) return '';
       const u = new URL(value);
       if (u.protocol !== 'https:' || u.username || u.password || (u.port && u.port !== '443')) return '';
-      return MEDIA_DOMAINS.some(d => u.hostname === d || u.hostname.endsWith('.' + d)) ? u.href : '';
+      return tiktokVideoHost(u.hostname) || MEDIA_DOMAINS.some(d => u.hostname === d || u.hostname.endsWith('.' + d)) ? u.href : '';
     } catch { return ''; }
+  }
+  function downloadURL(value, author) {
+    const url = mediaURL(value);
+    if (!url) return '';
+    const host = new URL(url).hostname;
+    const domains = author.startsWith('tiktok:') ? ['tiktokcdn.com', 'tiktokcdn-us.com'] : ['douyinvod.com', 'douyincdn.com'];
+    return (author.startsWith('tiktok:') && tiktokVideoHost(host)) || domains.some(d => host === d || host.endsWith('.' + d)) ? url : '';
   }
   function count(value) {
     if (value === null || value === undefined || value === '' || typeof value === 'boolean') return null;
@@ -41,6 +55,7 @@
   }
   function normalize(item, author) {
     if (!item || typeof item !== 'object') return null;
+    if (author.startsWith('tiktok:')) return normalizeTikTok(item, author);
     // Never round a long ID received as an unsafe JavaScript number.
     if (typeof item.aweme_id === 'number' && !Number.isSafeInteger(item.aweme_id)) return null;
     const id = String(item.aweme_id || '');
@@ -62,13 +77,36 @@
       candidates, collectedAt: new Date().toISOString()
     };
   }
+  function normalizeTikTok(item, author) {
+    if (typeof item.id === 'number' && !Number.isSafeInteger(item.id)) return null;
+    const id = String(item.id || '');
+    if (!/^\d{5,30}$/.test(id) || typeof item.author?.uniqueId !== 'string' || `tiktok:${item.author.uniqueId.toLowerCase()}` !== author) return null;
+    if (item.imagePost) return { id, image: true };
+    if (!item.video || typeof item.video !== 'object') return null;
+    const desc = string(item.desc), stats = item.statsV2 || item.stats || {}, fallback = item.stats || {};
+    const video = item.video;
+    const addresses = addr => typeof addr === 'string' ? [addr] : Array.isArray(addr?.UrlList || addr?.urlList) ? (addr.UrlList || addr.urlList).slice(0, 20) : [];
+    // Playback URLs contain the complete video; do not collect separate bitrateAudioInfo streams.
+    const rates = (Array.isArray(video.bitrateInfo) ? video.bitrateInfo : []).slice(0, 32).filter(r => !r.CodecType || /h264|avc/i.test(r.CodecType));
+    rates.sort((a, b) => (Number(b.PlayAddr?.Width) * Number(b.PlayAddr?.Height) || 0) - (Number(a.PlayAddr?.Width) * Number(a.PlayAddr?.Height) || 0) || (Number(b.Bitrate) || 0) - (Number(a.Bitrate) || 0));
+    const candidates = preferCandidates([video.downloadAddr, video.playAddr, video.PlayAddrStruct, ...rates.map(r => r.PlayAddr)].flatMap(addresses)).filter(url => downloadURL(url, author));
+    return { id, author, nickname: string(item.author.nickname, 100), title: desc.split(/\r?\n/)[0].trim().slice(0, 80) || '无标题', description: desc, titleSource: '文案截取',
+      likes: count(stats.diggCount ?? fallback.diggCount), shares: count(stats.shareCount ?? fallback.shareCount), comments: count(stats.commentCount ?? fallback.commentCount),
+      created: count(item.createTime), url: `https://www.tiktok.com/@${item.author.uniqueId}/video/${id}`, candidates, collectedAt: new Date().toISOString() };
+  }
   function validatePage(data) {
+    if (data && Object.hasOwn(data, 'statusCode')) {
+      if (data.statusCode !== 0) throw new Error(data.statusMsg || data.status_msg || 'TikTok 未返回有效作品列表，请在网页确认登录或验证提示。');
+      if (![0, 1, false, true].includes(data.hasMore)) throw new Error('分页状态缺失，无法确认是否读取完整。');
+      if (!Array.isArray(data.itemList) && !((data.hasMore === false || data.hasMore === 0) && data.itemList === undefined)) throw new Error('TikTok 作品列表缺失，当前结果可能不完整。');
+      return { status_code: 0, aweme_list: data.itemList || [], has_more: data.hasMore, max_cursor: data.cursor };
+    }
     if (!data || data.status_code !== 0 || !Array.isArray(data.aweme_list)) throw new Error(data?.status_msg || '接口未返回有效作品列表，请确认登录状态，或滚动主页继续收集。');
     if (![0, 1, false, true].includes(data.has_more)) throw new Error('分页状态缺失，无法确认是否读取完整。');
     return data;
   }
   function pageDecision(data, current, seen, emptyStreak) {
-    validatePage(data);
+    data = validatePage(data);
     if (data.has_more === false || data.has_more === 0) return { complete: true };
     if (emptyStreak >= 3) throw new Error('连续三页没有作品，读取已暂停；当前结果可能不完整。');
     const next = data.max_cursor;
@@ -119,5 +157,5 @@
     delete(id) { this.bytes -= this.sizes.get(id) || 0; this.sizes.delete(id); return super.delete(id); }
     clear() { super.clear(); this.sizes.clear(); this.bytes = 0; }
   }
-  root.DYCore = { authorFromURL, mediaURL, count, normalize, validatePage, pageDecision, selectRows, safeFilename, dateText, exportRows, BoundedRows, CapacityError, preferCandidates, videoCandidates };
+  root.DYCore = { authorFromURL, platformFor, profileURL, mediaURL, downloadURL, count, normalize, validatePage, pageDecision, selectRows, safeFilename, dateText, exportRows, BoundedRows, CapacityError, preferCandidates, videoCandidates };
 })(globalThis);

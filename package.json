@@ -1,8 +1,8 @@
 {
   "name": "douyin-worklist-extension",
-  "version": "0.1.5",
+  "version": "0.2.0",
   "private": true,
-  "description": "Local Chrome extension for Douyin author video lists",
+  "description": "Local Chrome extension for Douyin and TikTok author video lists",
   "scripts": {
     "test": "node --test tests/*.test.cjs",
     "check": "node scripts/check.cjs",
