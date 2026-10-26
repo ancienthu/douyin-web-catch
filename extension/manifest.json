@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "抖音 / TikTok 作品清单",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "在抖音或 TikTok 作者主页整理公开视频，查看互动数据、下载单条视频并导出 Excel。",
   "minimum_chrome_version": "120",
   "permissions": [

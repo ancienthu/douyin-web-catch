@@ -24,7 +24,7 @@
     activeController?.abort(); activeController = null;
     for (const [id, p] of pending) { post({ type: 'cancel', id }); p.done(new DOMException('已清理', 'AbortError')); }
     observe(false);
-    post({ type: 'reset' });
+    post({ type: 'reset', previousAuthor: state.author });
     state.rows.clear(); state.images.clear(); state.downloads.clear();
     Object.assign(state, { nickname: '', total: null, phase: 'idle', message, page: 1, query: '', complete: false });
     if (exportURL) { URL.revokeObjectURL(exportURL); exportURL = null; }

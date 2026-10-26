@@ -4,13 +4,13 @@
 
 在已登录的抖音或 TikTok 作者主页，把公开视频整理成可搜索的列表，支持单条视频下载和 Excel 导出。
 
-**当前版本：0.2.0 · Chrome 本地安装 · 无需服务器或填写 Cookie**
+**当前版本：0.2.1 · Chrome 本地安装 · 无需服务器或填写 Cookie**
 
 本项目为独立开发的第三方工具，与抖音、TikTok 官方无关联。
 
 ## 下载安装
 
-[下载本地安装包](https://github.com/ancienthu/douyin-web-catch/raw/refs/heads/main/dist/douyin-worklist-0.2.0.zip)，解压后保留 `douyin-worklist` 文件夹。
+[下载本地安装包](https://github.com/ancienthu/douyin-web-catch/raw/refs/heads/main/dist/douyin-worklist-0.2.1.zip)，解压后保留 `douyin-worklist` 文件夹。
 
 1. 在 Chrome 地址栏打开 `chrome://extensions`。
 2. 打开右上角「开发者模式」。
@@ -36,6 +36,7 @@
 
 - 支持 `www.tiktok.com/@用户名` 作者主页；推荐页、搜索页、单条视频页和直播页隐藏入口。
 - 使用当前网页的登录状态和请求包装器读取 `/api/post/item_list/`，自动分页、按作品 ID 去重；页面尚未加载请求参数时，向下滚动主页后再点击「读取全部」。
+- 站内切换作者后，会从当前作者主页重新核对资料，并恢复该作者近期请求中的必要参数，无需先手动刷新页面。主页响应限制为 5 MiB，仅解析初始 JSON，不执行返回的页面脚本。
 - 只复用当前作者的一份有上限的请求参数，不复制或生成签名、不读取 Cookie，不将参数写入磁盘；手动清理、页面离开或切换作者后释放。
 - 返回空响应、验证页或异常分页时保留现有结果并提示未完成；打开侧栏后也可滚动收集网页正常加载的作品。
 - 已在登录后的真实作者主页验证完整读取、跨页搜索、Excel 导出和单条 MP4 下载；一次实测读取 100 条视频、跳过 15 条图文，与主页的 115 个作品对应。

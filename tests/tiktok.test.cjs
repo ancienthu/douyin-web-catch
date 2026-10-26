@@ -53,17 +53,24 @@ test('TikTok pagination validates camelCase status, explicit completion and curs
   assert.throws(() => C.pageDecision({ ...page, max_cursor: '0' }, '0', new Set(), 0), /重复/);
 });
 
-function bridgeSetup({ hydration = true, empty = false } = {}) {
+function bridgeSetup({ hydration = true, empty = false, htmlUser = null, entries = [], html = null, htmlGate = null } = {}) {
   const messages = [], calls = [], listeners = {};
   const location = { href: 'https://www.tiktok.com/@creator.test', origin: 'https://www.tiktok.com', pathname: '/@creator.test' };
   const userInfo = { user: { uniqueId: 'creator.test', secUid: 'SEC_PUBLIC', nickname: 'Creator' }, stats: { videoCount: 60 } };
-  const document = { getElementById: () => hydration ? { textContent: JSON.stringify({ __DEFAULT_SCOPE__: { 'webapp.user-detail': { userInfo } } }) } : null };
+  const hydrationText = info => JSON.stringify({ __DEFAULT_SCOPE__: { 'webapp.user-detail': { userInfo: info } } });
+  const document = { getElementById: () => hydration ? { textContent: hydrationText(userInfo) } : null };
   const data = { statusCode: 0, itemList: [item()], hasMore: true, cursor: '100' };
   const window = { postMessage: m => messages.push(m), addEventListener: (name, fn) => { listeners[name] = fn; },
-    fetch: async (url, options) => { calls.push({ url, options }); const value = url.includes('/api/user/detail/') ? { statusCode: 0, userInfo } : data;
+    fetch: async (url, options) => { calls.push({ url, options });
+      if (new URL(url).pathname.startsWith('/@')) {
+        if (htmlGate) await htmlGate;
+        const text = html ?? `<html><script id="__UNIVERSAL_DATA_FOR_REHYDRATION__" type="application/json">${hydrationText(htmlUser || userInfo)}</script></html>`;
+        return { ok: true, body: new ReadableStream({ start(c) { c.enqueue(new TextEncoder().encode(text)); c.close(); } }) };
+      }
+      const value = url.includes('/api/user/detail/') ? { statusCode: 0, userInfo } : data;
       return { ok: true, json: async () => { if (empty) throw new SyntaxError('empty'); return value; }, clone: () => ({ json: async () => value }) }; } };
   class XHR { open() {} send() {} addEventListener() {} }
-  vm.runInNewContext(fs.readFileSync(require.resolve('../extension/tiktok-bridge.js'), 'utf8'), { window, document, location, XMLHttpRequest: XHR, URL, AbortController, DOMException, setTimeout, clearTimeout });
+  vm.runInNewContext(fs.readFileSync(require.resolve('../extension/tiktok-bridge.js'), 'utf8'), { window, document, location, XMLHttpRequest: XHR, URL, AbortController, DOMException, TextDecoder, performance: { getEntriesByType: () => entries }, setTimeout, clearTimeout });
   const send = m => listeners.message({ source: window, origin: location.origin, data: { channel: 'dy-worklist-v1', from: 'extension', ...m } });
   return { messages, calls, listeners, location, window, send, data };
 }
@@ -108,12 +115,83 @@ test('TikTok bridge observes only the current creator posts while enabled, witho
 test('TikTok SPA profiles resolve fresh public user info instead of reusing the old creator template', async () => {
   const s = bridgeSetup({ hydration: false });
   await s.send({ type: 'request', kind: 'posts', id: 'r', author, cursor: '0' });
-  assert.equal(new URL(s.calls[0].url).pathname, '/api/user/detail/'); assert.equal(s.calls.length, 2);
+  assert.equal(new URL(s.calls[0].url).pathname, '/@creator.test'); assert.equal(s.calls.length, 2);
   s.location.pathname = '/explore'; s.location.href = 'https://www.tiktok.com/explore';
   await s.send({ type: 'request', kind: 'posts', id: 'bad', author, cursor: '0' }); assert.equal(s.calls.length, 2);
   s.location.pathname = '/@other'; s.location.href = 'https://www.tiktok.com/@other';
   await s.send({ type: 'request', kind: 'posts', id: 'other', author: 'tiktok:other', cursor: '0' });
   assert.match(s.messages.at(-1).error, /资料未就绪/); assert.equal(s.calls.length, 3);
+});
+test('TikTok SPA recovers only current verified creator parameters after the page API already loaded', async () => {
+  const s = bridgeSetup({ hydration: false, entries: [
+    { name: 'https://www.tiktok.com/api/post/item_list/?secUid=SEC_PUBLIC&device_id=current&region=US&X-Bogus=secret&msToken=secret' },
+    { name: 'https://www.tiktok.com/api/post/item_list/?secUid=OTHER&device_id=wrong' },
+    { name: 'https://evil.test/api/post/item_list/?secUid=SEC_PUBLIC&device_id=wrong' }
+  ] });
+  await s.send({ type: 'request', kind: 'posts', id: 'r', author, cursor: '0' });
+  const url = new URL(s.calls.at(-1).url);
+  assert.equal(url.searchParams.get('device_id'), 'current');
+  assert.equal(url.searchParams.get('region'), 'US');
+  assert.equal(url.searchParams.has('msToken'), false); assert.equal(url.searchParams.has('X-Bogus'), false);
+  assert.equal(s.messages.at(-1).data.statusCode, 0);
+});
+test('TikTok captures SPA parameters before verification and survives delayed cleanup of the previous author', async () => {
+  const s = bridgeSetup({ hydration: false });
+  await s.window.fetch('https://www.tiktok.com/api/post/item_list/?secUid=SEC_PUBLIC&device_id=spa&msToken=secret');
+  await s.send({ type: 'reset', previousAuthor: 'tiktok:previous' });
+  await s.send({ type: 'request', kind: 'posts', id: 'r', author, cursor: '0' });
+  const url = new URL(s.calls.at(-1).url);
+  assert.equal(url.searchParams.get('device_id'), 'spa'); assert.equal(url.searchParams.has('msToken'), false);
+  await s.send({ type: 'reset', previousAuthor: author });
+  await s.send({ type: 'request', kind: 'posts', id: 'after-clear', author, cursor: '0' });
+  assert.equal(new URL(s.calls.at(-1).url).searchParams.has('device_id'), false);
+});
+test('TikTok author switch ignores the previous document hydration and reads the current profile document', async () => {
+  const s = bridgeSetup({ htmlUser: { user: { uniqueId: 'other', secUid: 'NEW', nickname: 'Next' }, stats: { videoCount: 18 } } });
+  await s.window.fetch('https://www.tiktok.com/api/post/item_list/?secUid=SEC_PUBLIC&device_id=old');
+  s.location.pathname = '/@other'; s.location.href = 'https://www.tiktok.com/@other';
+  await s.window.fetch('https://www.tiktok.com/api/post/item_list/?secUid=NEW&device_id=new');
+  await s.send({ type: 'reset', previousAuthor: author });
+  await s.send({ type: 'request', kind: 'profile', id: 'p', author: 'tiktok:other', cursor: '0' });
+  assert.equal(new URL(s.calls.at(-1).url).pathname, '/@other');
+  assert.equal(s.messages.at(-1).data.user.aweme_count, 18);
+  await s.send({ type: 'request', kind: 'posts', id: 'r', author: 'tiktok:other', cursor: '0' });
+  const url = new URL(s.calls.at(-1).url);
+  assert.equal(url.searchParams.get('secUid'), 'NEW'); assert.equal(url.searchParams.get('device_id'), 'new');
+});
+test('TikTok unverified parameters and responses cannot be reused for a different secUid', async () => {
+  const s = bridgeSetup({ hydration: false });
+  await s.send({ type: 'observe', enabled: true });
+  await s.window.fetch('https://www.tiktok.com/api/post/item_list/?secUid=OTHER&device_id=wrong');
+  await settle(); assert.equal(s.messages.length, 0);
+  await s.send({ type: 'request', kind: 'posts', id: 'r', author, cursor: '0' });
+  assert.equal(new URL(s.calls.at(-1).url).searchParams.has('device_id'), false);
+  await s.send({ type: 'reset', previousAuthor: author });
+  assert.equal(s.messages.at(-1).data.statusCode, 0);
+});
+test('TikTok fresh profile rejects wrong authors, verification HTML and oversized documents', async () => {
+  for (const config of [
+    { htmlUser: { user: { uniqueId: 'other', secUid: 'OTHER' } } },
+    { html: '<html>Verify your identity</html>' },
+    { html: 'x'.repeat(5 * 1024 * 1024 + 1) }
+  ]) {
+    const s = bridgeSetup({ hydration: false, ...config });
+    await s.send({ type: 'request', kind: 'posts', id: 'r', author, cursor: '0' });
+    assert.ok(s.messages.at(-1).error); assert.equal(s.messages.at(-1).data, undefined);
+    assert.equal(s.calls.length, 1);
+  }
+});
+test('TikTok late profile fetch cannot restore cleared data or populate a different author', async () => {
+  for (const clear of [true, false]) {
+    let release;
+    const s = bridgeSetup({ hydration: false, htmlGate: new Promise(resolve => { release = resolve; }) });
+    const pending = s.send({ type: 'request', kind: 'posts', id: 'r', author, cursor: '0' });
+    if (clear) await s.send({ type: 'reset' });
+    else { s.location.pathname = '/@other'; s.location.href = 'https://www.tiktok.com/@other'; }
+    release(); await pending;
+    assert.equal(s.calls.length, 1); assert.equal(s.messages.at(-1).data, undefined);
+    assert.match(s.messages.at(-1).error, /停止/);
+  }
 });
 test('TikTok empty HTTP 200 response is a failure and cannot imply no videos', async () => {
   const s = bridgeSetup({ empty: true });
